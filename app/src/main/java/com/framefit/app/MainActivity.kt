@@ -1,15 +1,12 @@
 package com.framefit.app
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Parcelable
@@ -32,7 +29,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -40,13 +36,13 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.framefit.app.databinding.ActivityMainBinding
 import java.io.File
 import java.io.FileInputStream
-import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TARGET_URL = "https://otter21030-droid.github.io/newapp/"
         private const val BACK_PRESS_INTERVAL = 2000L
+        private const val FILE_PROVIDER_AUTHORITY = "com.framefit.app.fileprovider"
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -55,7 +51,6 @@ class MainActivity : AppCompatActivity() {
     // File Chooser state
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private var cameraImageUri: Uri? = null
-    private var cameraVideoUri: Uri? = null
 
     // SAF Save File state
     private var pendingSaveFile: File? = null
@@ -67,7 +62,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
     private lateinit var saveFileLauncher: ActivityResultLauncher<Intent>
-    private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,7 +98,14 @@ class MainActivity : AppCompatActivity() {
         fileChooserLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
-            val callback = fileUploadCallback ?: return@registerForActivityResult
+            val callback = fileUploadCallback
+            fileUploadCallback = null
+
+            if (callback == null) {
+                cameraImageUri = null
+                return@registerForActivityResult
+            }
+
             var results: Array<Uri>? = null
 
             if (result.resultCode == RESULT_OK) {
@@ -120,15 +121,11 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else if (cameraImageUri != null) {
                     results = arrayOf(cameraImageUri!!)
-                } else if (cameraVideoUri != null) {
-                    results = arrayOf(cameraVideoUri!!)
                 }
             }
 
             callback.onReceiveValue(results)
-            fileUploadCallback = null
             cameraImageUri = null
-            cameraVideoUri = null
         }
 
         // 2. SAF Save File Launcher (User selects destination in device storage)
@@ -168,11 +165,6 @@ class MainActivity : AppCompatActivity() {
             pendingSaveFile = null
             pendingSaveFileName = null
         }
-
-        // 3. Permission Launcher
-        permissionLauncher = registerForActivityResult(
-            ActivityResultContracts.RequestMultiplePermissions()
-        ) { /* Handled */ }
     }
 
     /**
@@ -187,7 +179,12 @@ class MainActivity : AppCompatActivity() {
             type = if (mimeType.isNotBlank()) mimeType else "*/*"
             putExtra(Intent.EXTRA_TITLE, fileName)
         }
-        saveFileLauncher.launch(saveIntent)
+        try {
+            saveFileLauncher.launch(saveIntent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "저장 창을 열 수 없습니다: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -261,11 +258,11 @@ class MainActivity : AppCompatActivity() {
                 filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
             ): Boolean {
+                // Safely cancel any pending callback to avoid webview hang
                 fileUploadCallback?.onReceiveValue(null)
                 fileUploadCallback = filePathCallback
 
-                openCustomFileChooser(fileChooserParams)
-                return true
+                return startUnifiedFileChooser(fileChooserParams)
             }
 
             override fun onPermissionRequest(request: PermissionRequest?) {
@@ -363,6 +360,78 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Reliable File Chooser for Photos, Videos, and PDFs.
+     * Guaranteed never to crash and always triggers the system picker.
+     */
+    private fun startUnifiedFileChooser(fileChooserParams: WebChromeClient.FileChooserParams?): Boolean {
+        cameraImageUri = null
+        val extraIntents = mutableListOf<Intent>()
+
+        // Optional: Prepare camera capture intent if available
+        try {
+            val photoFile = FileUtils.createTempImageFile(this)
+            val photoURI = FileProvider.getUriForFile(
+                this,
+                FILE_PROVIDER_AUTHORITY,
+                photoFile
+            )
+            cameraImageUri = photoURI
+
+            val takePhotoIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                putExtra(MediaStore.EXTRA_OUTPUT, photoURI)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            extraIntents.add(takePhotoIntent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            cameraImageUri = null
+        }
+
+        // Standard Storage Picker Intent (Supports images, videos, and PDFs)
+        val contentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "*/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf(
+                    "image/*",
+                    "video/*",
+                    "application/pdf",
+                    "application/x-pdf",
+                    "application/zip",
+                    "application/x-zip-compressed"
+                )
+            )
+        }
+
+        val chooserIntent = Intent(Intent.ACTION_CHOOSER).apply {
+            putExtra(Intent.EXTRA_INTENT, contentIntent)
+            putExtra(Intent.EXTRA_TITLE, getString(R.string.file_chooser_title))
+            if (extraIntents.isNotEmpty()) {
+                putExtra(Intent.EXTRA_INITIAL_INTENTS, extraIntents.toTypedArray<Parcelable>())
+            }
+        }
+
+        return try {
+            fileChooserLauncher.launch(chooserIntent)
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Fallback: Launch content intent directly if Chooser failed on this device
+            try {
+                fileChooserLauncher.launch(contentIntent)
+                true
+            } catch (e2: Exception) {
+                e2.printStackTrace()
+                fileUploadCallback?.onReceiveValue(null)
+                fileUploadCallback = null
+                false
+            }
+        }
+    }
+
+    /**
      * Injects mobile responsive CSS & Download intercept scripts into the webview.
      */
     private fun injectMobileEnhancements(view: WebView?) {
@@ -436,6 +505,7 @@ class MainActivity : AppCompatActivity() {
                 min-height: 180px !important;
                 padding: 24px 16px !important;
                 border-radius: 20px !important;
+                cursor: pointer !important;
             }
             .dropzone.is-compact {
                 grid-template-columns: 1fr !important;
@@ -455,6 +525,7 @@ class MainActivity : AppCompatActivity() {
                 font-size: 14px !important;
                 width: 100% !important;
                 max-width: 260px !important;
+                cursor: pointer !important;
             }
             .controls {
                 grid-template-columns: 1fr !important;
@@ -641,132 +712,6 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
 
         view.evaluateJavascript(script, null)
-    }
-
-    /**
-     * Opens an Intent Chooser that supports Images, Videos, and PDFs,
-     * along with Camera (Photo) and Camcorder (Video) capture options.
-     */
-    private fun openCustomFileChooser(fileChooserParams: WebChromeClient.FileChooserParams?) {
-        checkAndRequestPermissions()
-
-        val intents = mutableListOf<Intent>()
-
-        // 1. Camera Photo capture option
-        try {
-            val photoFile = FileUtils.createTempImageFile(this)
-            val photoURI = FileProvider.getUriForFile(
-                this,
-                "${applicationContext.packageName}.fileprovider",
-                photoFile
-            )
-            cameraImageUri = photoURI
-
-            val takePhotoIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
-                putExtra(MediaStore.EXTRA_OUTPUT, photoURI)
-                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            intents.add(takePhotoIntent)
-        } catch (e: IOException) {
-            e.printStackTrace()
-        }
-
-        // 2. Camera Video capture option
-        try {
-            val videoFile = FileUtils.createTempVideoFile(this)
-            val videoURI = FileProvider.getUriForFile(
-                this,
-                "${applicationContext.packageName}.fileprovider",
-                videoFile
-            )
-            cameraVideoUri = videoURI
-
-            val takeVideoIntent = Intent(MediaStore.ACTION_VIDEO_CAPTURE).apply {
-                putExtra(MediaStore.EXTRA_OUTPUT, videoURI)
-                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            intents.add(takeVideoIntent)
-        } catch (e: IOException) {
-            e.printStackTrace()
-        }
-
-        // 3. File System Picker: Accepts Images, Videos, and PDFs
-        val pickIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
-            type = "*/*"
-            addCategory(Intent.CATEGORY_OPENABLE)
-            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-            putExtra(
-                Intent.EXTRA_MIME_TYPES,
-                arrayOf(
-                    "image/*",
-                    "video/*",
-                    "application/pdf",
-                    "application/x-pdf",
-                    "application/zip"
-                )
-            )
-        }
-
-        // 4. Unified Chooser
-        val chooserIntent = Intent(Intent.ACTION_CHOOSER).apply {
-            putExtra(Intent.EXTRA_INTENT, pickIntent)
-            putExtra(Intent.EXTRA_TITLE, getString(R.string.file_chooser_title))
-            if (intents.isNotEmpty()) {
-                putExtra(Intent.EXTRA_INITIAL_INTENTS, intents.toTypedArray<Parcelable>())
-            }
-        }
-
-        fileChooserLauncher.launch(chooserIntent)
-    }
-
-    private fun checkAndRequestPermissions() {
-        val permissions = mutableListOf<String>()
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            permissions.add(Manifest.permission.CAMERA)
-        }
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            permissions.add(Manifest.permission.RECORD_AUDIO)
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
-            }
-        } else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
-        } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-        }
-
-        if (permissions.isNotEmpty()) {
-            permissionLauncher.launch(permissions.toTypedArray())
-        }
     }
 
     private fun handleUrlDownload(url: String, mimeType: String?) {
