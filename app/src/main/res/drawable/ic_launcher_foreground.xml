@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Translucent camera body card -->
+    <path
+        android:fillColor="#33FFFFFF"
+        android:pathData="M31,31 h46 a10,10 0 0 1 10,10 v26 a10,10 0 0 1 -10,10 h-46 a10,10 0 0 1 -10,-10 v-26 a10,10 0 0 1 10,-10 z" />
+
+    <!-- Photo Crop / Frame Borders -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M33,33 h42 a8,8 0 0 1 8,8 v26 a8,8 0 0 1 -8,8 h-42 a8,8 0 0 1 -8,-8 v-26 a8,8 0 0 1 8,-8 z" />
+
+    <!-- Pro Crop Corner / Viewfinder Guides -->
+    <path
+        android:strokeColor="#FFEAA7"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M27,39 v-8 h8 M81,39 v-8 h-8 M27,69 v8 h8 M81,69 v8 h-8" />
+
+    <!-- Center Camera Lens Outer Ring -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:pathData="M54,54 m-13,0 a13,13 0 1 1 26,0 a13,13 0 1 1 -26,0" />
+
+    <!-- Inner Aperture / Gradient Shimmer -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54 m-8,0 a8,8 0 1 1 16,0 a8,8 0 1 1 -16,0" />
+
+    <!-- Lens Reflection Spot -->
+    <path
+        android:fillColor="#FF5E7E"
+        android:pathData="M54,54 m-4,0 a4,4 0 1 1 8,0 a4,4 0 1 1 -8,0" />
+
+    <!-- Magic Photo Edit Sparkle (Top-Right of lens) -->
+    <path
+        android:fillColor="#FFEAA7"
+        android:pathData="M70,36 Q70,41 75,41 Q70,41 70,46 Q70,41 65,41 Q70,41 70,36 Z" />
+
+    <!-- Secondary Small Star Sparkle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M37,67 Q37,69.5 39.5,69.5 Q37,69.5 37,72 Q37,69.5 34.5,69.5 Q37,69.5 37,67 Z" />
+
+</vector>
+
