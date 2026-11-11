@@ -1,14 +1,12 @@
 package com.framefit.app
 
-import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
-import android.provider.MediaStore
-import android.util.Base64
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -22,83 +20,56 @@ object FileUtils {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val storageDir = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
             ?: context.cacheDir
-        return File.createTempFile("JPEG_${timeStamp}_", ".jpg", storageDir)
+        return File.createTempFile("IMG_${timeStamp}_", ".jpg", storageDir)
     }
 
     /**
-     * Saves Base64-encoded file data (e.g. from blob: URLs or data URIs) to the public Downloads folder.
+     * Creates a temporary video file for camera video captures.
      */
-    fun saveBase64ToDownloads(
-        context: Context,
-        base64Data: String,
-        mimeType: String,
-        suggestedFileName: String
-    ): Uri? {
-        val cleanBase64 = if (base64Data.contains(",")) {
-            base64Data.substringAfter(",")
-        } else {
-            base64Data
-        }
+    fun createTempVideoFile(context: Context): File {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val storageDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+            ?: context.cacheDir
+        return File.createTempFile("VID_${timeStamp}_", ".mp4", storageDir)
+    }
 
-        val bytes = try {
-            Base64.decode(cleanBase64, Base64.DEFAULT)
+    /**
+     * Writes byte array data directly to a user-selected SAF Document Uri.
+     */
+    fun writeBytesToUri(context: Context, targetUri: Uri, bytes: ByteArray): Boolean {
+        return try {
+            context.contentResolver.openOutputStream(targetUri, "rwt")?.use { out ->
+                out.write(bytes)
+                out.flush()
+            }
+            true
         } catch (e: Exception) {
             e.printStackTrace()
-            return null
-        }
-
-        val fileName = sanitizeFileName(suggestedFileName, mimeType)
-
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-
-            val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-
-            if (uri != null) {
-                try {
-                    resolver.openOutputStream(uri)?.use { out ->
-                        out.write(bytes)
-                        out.flush()
-                    }
-                    contentValues.clear()
-                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                    resolver.update(uri, contentValues, null, null)
-                    uri
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    resolver.delete(uri, null, null)
-                    null
-                }
-            } else {
-                null
-            }
-        } else {
-            // Android 9 (Pie) or below
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) {
-                downloadsDir.mkdirs()
-            }
-            val targetFile = File(downloadsDir, fileName)
-            try {
-                FileOutputStream(targetFile).use { out ->
-                    out.write(bytes)
-                    out.flush()
-                }
-                Uri.fromFile(targetFile)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                null
-            }
+            false
         }
     }
 
-    private fun sanitizeFileName(fileName: String, mimeType: String): String {
+    /**
+     * Streams data from an input stream to a user-selected SAF Document Uri.
+     */
+    fun writeStreamToUri(context: Context, targetUri: Uri, inputStream: InputStream): Boolean {
+        return try {
+            context.contentResolver.openOutputStream(targetUri, "rwt")?.use { out ->
+                val buffer = ByteArray(8 * 1024)
+                var bytesRead: Int
+                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    out.write(buffer, 0, bytesRead)
+                }
+                out.flush()
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    fun sanitizeFileName(fileName: String, mimeType: String): String {
         var clean = fileName.trim().replace("[\\\\/:*?\"<>|]".toRegex(), "_")
         if (clean.isBlank()) {
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -111,13 +82,14 @@ object FileUtils {
                 "image/png" -> ".png"
                 "image/jpeg", "image/jpg" -> ".jpg"
                 "image/webp" -> ".webp"
+                "video/webm" -> ".webm"
+                "video/mp4" -> ".mp4"
                 "application/zip" -> ".zip"
                 "application/pdf" -> ".pdf"
-                else -> ".png"
+                else -> ".bin"
             }
             clean += ext
         }
         return clean
     }
 }
-
